@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # ChromaDB Vector Database
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: pdf-qa-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - pdf-qa-network
+
+  # Backend API Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pdf-qa-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - CHROMA_COLLECTION_NAME=pdf_documents
+      - UPLOAD_DIR=/app/uploads
+      - MAX_FILE_SIZE=10485760
+      - GROQ_MODEL=llama3-70b-8192
+      - EMBEDDING_MODEL=nomic-embed-text
+      - CHUNK_SIZE=1000
+      - CHUNK_OVERLAP=200
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - pdf-qa-network
+
+  # Frontend React App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pdf-qa-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3001
+    depends_on:
+      - backend
+    networks:
+      - pdf-qa-network
+
+volumes:
+  chromadb_data:
+    driver: local
+
+networks:
+  pdf-qa-network:
+    driver: bridge
+
+# Made with Bob
